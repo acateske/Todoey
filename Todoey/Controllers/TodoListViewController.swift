@@ -7,42 +7,73 @@
 //
 
 import UIKit
+import RealmSwift
+import ChameleonFramework
 
-class TodoListViewController: UITableViewController {
+class TodoListViewController: SwipeTableViewController {
 
-    var items = [Item]()
+    let realm = try! Realm()
     
-    let dataFilePath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("Items.plist")
+    var items: Results<Item>?
+    
+    var selectedCategory: Category? {
+        didSet {
+            load()
+        }
+    }
+    
+    @IBOutlet weak var searchBar: UISearchBar!
     
     override func viewDidLoad() {
         super.viewDidLoad()
-
-        let newItem1 = Item()
-        newItem1.title = "Home go"
-        items.append(newItem1)
         
-        let newItem2 = Item()
-        newItem2.title = "Buy drinks"
-        items.append(newItem2)
+        searchBar.delegate = self
+    }
+    
+    override func viewWillAppear(_ animated: Bool) {
         
-        let newItem3 = Item()
-        newItem3.title = "Do homework"
-        items.append(newItem3)
+        guard let color = selectedCategory?.color else {fatalError()}
+        updateNavBar(with: color)
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
         
-        load()
+        let hexColor = "00B0FF"
+        updateNavBar(with: hexColor)
+    }
+    
+    func updateNavBar(with colorHex: String) {
+        
+        title = selectedCategory?.name
+        guard let navBar = navigationController?.navigationBar else {fatalError("Navigation bar dont exist!")}
+        navBar.barTintColor = UIColor(hexString: colorHex)
+        searchBar.barTintColor = UIColor(hexString: colorHex)
+        guard let navBarColor = UIColor(hexString: colorHex) else {return}
+        navBar.tintColor = ContrastColorOf(navBarColor, returnFlat: true)
+        navBar.largeTitleTextAttributes = [NSAttributedString.Key.foregroundColor: ContrastColorOf(navBarColor, returnFlat: true)]
     }
 
     //MARK:- TableView DataSource
     
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return items.count
+        return items?.count ?? 1
     }
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         
-        let cell = tableView.dequeueReusableCell(withIdentifier: "TodoCell", for: indexPath)
-        cell.textLabel?.text = items[indexPath.row].title
-        cell.accessoryType = items[indexPath.row].done ? .checkmark : .none
+       let cell = super.tableView(tableView, cellForRowAt: indexPath)
+       
+        if let item = items?[indexPath.row] {
+            cell.textLabel?.text = item.title
+
+            if let color = UIColor(hexString: selectedCategory!.color)?.darken(byPercentage: CGFloat(CGFloat(indexPath.row)/CGFloat(items!.count))) {
+                cell.textLabel?.textColor = ContrastColorOf(color, returnFlat: true)
+                cell.backgroundColor = color
+            }
+            cell.accessoryType = item.done ? .checkmark : .none
+        } else {
+            cell.textLabel?.text = "No item add yet"
+        }
         return cell
     }
     
@@ -50,8 +81,16 @@ class TodoListViewController: UITableViewController {
     
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         
-        items[indexPath.row].done = !items[indexPath.row].done
-        save()
+        if let item = items?[indexPath.row] {
+            do {
+                try realm.write {
+                    item.done = !item.done
+                }
+            } catch {
+                print("Error", error.localizedDescription)
+            }
+        }
+        tableView.reloadData()
         tableView.deselectRow(at: indexPath, animated: true)
     }
     
@@ -64,10 +103,19 @@ class TodoListViewController: UITableViewController {
         let alert = UIAlertController(title: "Add New Item", message: "", preferredStyle: .alert)
         let action = UIAlertAction(title: "Add", style: .default) { [weak self](action) in
             
-            let newItem = Item()
-            newItem.title = textField.text!
-            self?.items.append(newItem)
-            self?.save()
+           if let currentCategory = self?.selectedCategory {
+                do {
+                    try self?.realm.write {
+                        let newItem = Item()
+                        newItem.title = textField.text!
+                        newItem.dateCreated = Date()
+                        currentCategory.items.append(newItem)
+                    }
+                } catch {
+                    print("Error saving data")
+                }
+            }
+           self?.tableView.reloadData()
         }
         alert.addAction(action)
         alert.addTextField { (alertTextField) in
@@ -79,27 +127,41 @@ class TodoListViewController: UITableViewController {
     
     //MARK:- Data manipulating methods
     
-    func save() {
+    func load() {
         
-        let encoder = PropertyListEncoder()
-        do {
-        let data = try encoder.encode(items)
-            guard let dataFilePath = dataFilePath else {fatalError()}
-            try data.write(to: dataFilePath)
-        } catch {
-            print("Error with saving data")
-        }
+        items = selectedCategory?.items.sorted(byKeyPath: "title", ascending: true)
+        
         tableView.reloadData()
     }
     
-    func load() {
+    override func updateModel(at indexPath: IndexPath) {
         
-        if let data = try? Data(contentsOf: dataFilePath!) {
-            let decoder = PropertyListDecoder()
+        if let itemForDeletion = items?[indexPath.row] {
             do {
-                items = try decoder.decode([Item].self, from: data)
+                try realm.write {
+                    realm.delete(itemForDeletion)
+                }
             } catch {
-                print("Error, can not retrive data")
+                print("Error",error.localizedDescription)
+            }
+        }
+    }
+}
+
+extension TodoListViewController: UISearchBarDelegate {
+    
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+
+        items = items?.filter("title CONTAINS [cd] %@", searchBar.text!).sorted(byKeyPath: "dateCreated", ascending: true)
+        tableView.reloadData()
+    }
+
+    func searchBar(_ searchBar: UISearchBar, textDidChange searchText: String) {
+
+        if searchBar.text!.count == 0 {
+            load()
+            DispatchQueue.main.async {
+                searchBar.resignFirstResponder()
             }
         }
     }
