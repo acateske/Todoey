@@ -40,7 +40,7 @@ class CategoryViewController: SwipeTableViewController {
         }
         return cell
     }
-    
+  
     //MARK: Table view delegate
     
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
