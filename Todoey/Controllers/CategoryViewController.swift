@@ -18,7 +18,7 @@ class CategoryViewController: SwipeTableViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+        print(Realm.Configuration.defaultConfiguration.fileURL)
         load()
     }
 
@@ -95,6 +95,7 @@ class CategoryViewController: SwipeTableViewController {
     func load() {
         
         categories = realm.objects(Category.self)
+       
        
         tableView.reloadData()
     }
